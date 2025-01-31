@@ -6,10 +6,32 @@ import (
 	"net/http"
 	"sync"
 
+	"github.com/gin-gonic/gin"
 	socketio "github.com/googollee/go-socket.io"
+	"github.com/googollee/go-socket.io/engineio"
+	"github.com/googollee/go-socket.io/engineio/transport"
+	"github.com/googollee/go-socket.io/engineio/transport/polling"
+	"github.com/googollee/go-socket.io/engineio/transport/websocket"
 	"github.com/joho/godotenv"
-	"github.com/rs/cors"
 )
+
+func GinMiddleware(allowOrigin string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Writer.Header().Set("Access-Control-Allow-Origin", allowOrigin)
+		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
+		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Accept, Authorization, Content-Type, Content-Length, X-CSRF-Token, Token, session, Origin, Host, Connection, Accept-Encoding, Accept-Language, X-Requested-With")
+
+		if c.Request.Method == http.MethodOptions {
+			c.AbortWithStatus(http.StatusNoContent)
+			return
+		}
+
+		c.Request.Header.Del("Origin")
+
+		c.Next()
+	}
+}
 
 type User struct {
 	UserID   string `json:"userId"`
@@ -20,6 +42,7 @@ type User struct {
 var connectedUsers = sync.Map{}
 
 func main() {
+	router := gin.New()
 	// Load environment variables
 	err := godotenv.Load()
 	if err != nil {
@@ -27,7 +50,12 @@ func main() {
 	}
 
 	// Create a new Socket.IO server
-	server := socketio.NewServer(nil)
+	server := socketio.NewServer(&engineio.Options{
+		Transports: []transport.Transport{
+			&websocket.Transport{},
+			&polling.Transport{},
+		},
+	})
 
 	// Handle connections
 	server.OnConnect("/", func(s socketio.Conn) error {
@@ -88,25 +116,22 @@ func main() {
 		log.Println("disconnected:", s.ID(), reason)
 	})
 
-	// Serve static files (optional)
-	http.Handle("/socket.io/", server)
-	// Add CORS middleware
-	c := cors.New(cors.Options{
-		AllowedOrigins:   []string{"*"}, // Allow your frontend origin
-		AllowedMethods:   []string{"GET", "POST", "OPTIONS"},
-		AllowedHeaders:   []string{"Content-Type"},
-		AllowCredentials: true,
-	})
+	go func() {
+		if err := server.Serve(); err != nil {
+			log.Fatalf("socketio listen error: %s\n", err)
+		}
+	}()
 
-	// Wrap the Socket.IO handler with CORS
-	handler := c.Handler(http.DefaultServeMux)
-	http.Handle("/", http.FileServer(http.Dir("./public")))
+	defer server.Close()
+	router.Use(GinMiddleware("http://localhost:3000"))
+	router.GET("/socket.io/*any", gin.WrapH(server))
+	router.POST("/socket.io/*any", gin.WrapH(server))
+	router.StaticFS("/public", http.Dir("../asset"))
 
-	// Start the server
-	log.Println("Socket.IO server started on :8800")
-	if err := http.ListenAndServe(":8800", handler); err != nil {
-		log.Fatal("ListenAndServe:", err)
+	if err := router.Run(":8800"); err != nil {
+		log.Fatal("failed run app: ", err)
 	}
+
 }
 
 // Broadcast connected users to all clients
