@@ -1,161 +1,90 @@
 package main
 
 import (
-	"encoding/json"
-	"log"
-	"net/http"
-	"sync"
+	"fmt"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
-	"github.com/gin-gonic/gin"
-	socketio "github.com/googollee/go-socket.io"
-	"github.com/googollee/go-socket.io/engineio"
-	"github.com/googollee/go-socket.io/engineio/transport"
-	"github.com/googollee/go-socket.io/engineio/transport/polling"
-	"github.com/googollee/go-socket.io/engineio/transport/websocket"
-	"github.com/joho/godotenv"
+	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/adaptor"
+	"github.com/zishang520/engine.io/v2/log"
+	"github.com/zishang520/engine.io/v2/types"
+	"github.com/zishang520/socket.io/v2/socket"
 )
 
-func GinMiddleware(allowOrigin string) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		c.Writer.Header().Set("Access-Control-Allow-Origin", allowOrigin)
-		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
-		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Accept, Authorization, Content-Type, Content-Length, X-CSRF-Token, Token, session, Origin, Host, Connection, Accept-Encoding, Accept-Language, X-Requested-With")
-
-		if c.Request.Method == http.MethodOptions {
-			c.AbortWithStatus(http.StatusNoContent)
-			return
-		}
-
-		c.Request.Header.Del("Origin")
-
-		c.Next()
-	}
-}
-
-type User struct {
-	UserID   string `json:"userId"`
-	SocketID string `json:"socketId"`
-	Status   string `json:"status"`
-}
-
-var connectedUsers = sync.Map{}
-
 func main() {
-	router := gin.New()
-	// Load environment variables
-	err := godotenv.Load()
-	if err != nil {
-		log.Fatal("Error loading .env file")
-	}
-
-	// Create a new Socket.IO server
-	server := socketio.NewServer(&engineio.Options{
-		Transports: []transport.Transport{
-			&websocket.Transport{},
-			&polling.Transport{},
-		},
+	log.DEBUG = true
+	c := socket.DefaultServerOptions()
+	c.SetServeClient(true)
+	// c.SetConnectionStateRecovery(&socket.ConnectionStateRecovery{})
+	// c.SetAllowEIO3(true)
+	c.SetPingInterval(300 * time.Millisecond)
+	c.SetPingTimeout(200 * time.Millisecond)
+	c.SetMaxHttpBufferSize(1000000)
+	c.SetConnectTimeout(1000 * time.Millisecond)
+	c.SetCors(&types.Cors{
+		Origin:      "*",
+		Credentials: true,
+	})
+	socketio := socket.NewServer(nil, nil)
+	socketio.On("connection", func(clients ...interface{}) {
+		client := clients[0].(*socket.Socket)
+		client.On("newConnection", func(args ...interface{}) {
+			fmt.Println("Connection")
+			fmt.Println(args)
+			client.Emit("newConnection", args...)
+		})
+		client.On("join", func(args ...interface{}) {
+			room := args[0].(string)
+			client.Join(socket.Room(room))
+			client.Emit("joined", room)
+		})
+		client.On("typing", func(args ...interface{}) {
+			room := args[0].(string)
+			client.In(socket.Room(room)).Emit("typing", args...)
+		})
+		client.On("stop typing", func(args ...interface{}) {
+			room := args[0].(string)
+			client.In(socket.Room(room)).Emit("stop typing", args...)
+		})
+		client.On("accesDeniedForRule", func(args ...interface{}) {
+			client.Emit("accesDeniedForRule", args...)
+		})
+		client.On("send-meet-notification", func(args ...interface{}) {
+			client.Emit("send-meet-notification", args...)
+		})
 	})
 
-	// Handle connections
-	server.OnConnect("/", func(s socketio.Conn) error {
-		s.SetContext("")
-		log.Println("connected:", s.ID())
-		return nil
+	socketio.Of("/custom", nil).On("connection", func(clients ...interface{}) {
+		client := clients[0].(*socket.Socket)
+		client.Emit("auth", client.Handshake().Auth)
 	})
 
-	// Handle "newConnection" event
-	server.OnEvent("/", "newConnection", func(s socketio.Conn, userId string) {
-		log.Println("newConnection:", userId)
-		connectedUsers.Store(userId, User{UserID: userId, SocketID: s.ID(), Status: "online"})
-		broadcastConnectedUsers(server)
-	})
+	app := fiber.New()
 
-	// Handle "setup" event
-	server.OnEvent("/", "setup", func(s socketio.Conn, userData map[string]interface{}) {
-		userId := userData["_id"].(string)
-		firstName := userData["firstName"].(string)
-		lastName := userData["lastName"].(string)
-		log.Println(firstName, lastName, "connected")
-		connectedUsers.Store(userId, User{UserID: userId, SocketID: s.ID(), Status: "online"})
-		broadcastConnectedUsers(server)
-	})
+	// app.Put("/socket.io", adaptor.HTTPHandler(socketio.ServeHandler(c))) // test
+	app.Get("/socket.io", adaptor.HTTPHandler(socketio.ServeHandler(c)))
+	app.Post("/socket.io", adaptor.HTTPHandler(socketio.ServeHandler(c)))
 
-	// Handle "join" event
-	server.OnEvent("/", "join", func(s socketio.Conn, room string) {
-		log.Println("User Joined Room:", room)
-		s.Join(room)
-		s.Emit("joined", map[string]string{"room": room})
-	})
+	go app.Listen(":8800")
 
-	// Handle "typing" event
-	server.OnEvent("/", "typing", func(s socketio.Conn, room string) {
-		server.BroadcastToRoom("/", room, "typing", nil)
-	})
+	exit := make(chan struct{})
+	SignalC := make(chan os.Signal, 1)
 
-	// Handle "stop typing" event
-	server.OnEvent("/", "stop typing", func(s socketio.Conn, room string) {
-		server.BroadcastToRoom("/", room, "stop typing", nil)
-	})
-
-	// Handle "new message" event
-	server.OnEvent("/", "new message", func(s socketio.Conn, newMessageReceived string) {
-		var messageData []interface{}
-		err := json.Unmarshal([]byte(newMessageReceived), &messageData)
-		if err != nil {
-			log.Println("Error decoding new message:", err)
-			return
-		}
-		handleNewMessage(server, messageData)
-	})
-
-	// Handle "disconnect" event
-	server.OnDisconnect("/", func(s socketio.Conn, reason string) {
-		deleteUser(s)
-		broadcastConnectedUsers(server)
-		log.Println("disconnected:", s.ID(), reason)
-	})
-
+	signal.Notify(SignalC, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 	go func() {
-		if err := server.Serve(); err != nil {
-			log.Fatalf("socketio listen error: %s\n", err)
+		for s := range SignalC {
+			switch s {
+			case syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT:
+				close(exit)
+				return
+			}
 		}
 	}()
 
-	defer server.Close()
-	router.Use(GinMiddleware("http://localhost:3000"))
-	router.GET("/socket.io/*any", gin.WrapH(server))
-	router.POST("/socket.io/*any", gin.WrapH(server))
-	router.StaticFS("/public", http.Dir("../asset"))
-
-	if err := router.Run(":8800"); err != nil {
-		log.Fatal("failed run app: ", err)
-	}
-
-}
-
-// Broadcast connected users to all clients
-func broadcastConnectedUsers(server *socketio.Server) {
-	users := []User{}
-	connectedUsers.Range(func(key, value interface{}) bool {
-		users = append(users, value.(User))
-		return true
-	})
-	server.BroadcastToNamespace("/", "connectedUsers", users)
-}
-
-// Handle new messages
-func handleNewMessage(server *socketio.Server, messageData []interface{}) {
-	// Implement your logic for handling new messages
-}
-
-// Delete a user from the connectedUsers map
-func deleteUser(s socketio.Conn) {
-	connectedUsers.Range(func(key, value interface{}) bool {
-		if value.(User).SocketID == s.ID() {
-			connectedUsers.Delete(key)
-			return false
-		}
-		return true
-	})
+	<-exit
+	socketio.Close(nil)
+	os.Exit(0)
 }
