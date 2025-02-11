@@ -11,5 +11,6 @@ func RegisterEvents(server *socketio.Server) {
 	server.OnEvent("/", "mobile_message", func(s socketio.Conn, msg string) {
 		fmt.Println("Mobile Message:", msg)
 		s.Emit("mobile_response", "Received: "+msg)
+
 	})
 }

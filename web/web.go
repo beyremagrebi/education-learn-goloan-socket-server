@@ -8,8 +8,9 @@ import (
 
 // RegisterEvents registers web-related events
 func RegisterEvents(server *socketio.Server) {
-	server.OnEvent("/", "web_message", func(s socketio.Conn, msg string) {
-		fmt.Println("Web Message:", msg)
-		s.Emit("web_response", "Received: "+msg)
+	server.OnEvent("/", "send-meet-notification", func(s socketio.Conn, users any) {
+		fmt.Printf("Hello meet notification: %v\n", users)
+		s.Emit("send-meet-notification", users)
+		server.BroadcastToNamespace("/", "send-meet-notification", users)
 	})
 }
