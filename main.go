@@ -10,6 +10,8 @@ import (
 	"github.com/googollee/go-socket.io/engineio/transport"
 	"github.com/googollee/go-socket.io/engineio/transport/polling"
 	"github.com/googollee/go-socket.io/engineio/transport/websocket"
+	"github.com/proservices/socket-golang-server/mobile"
+	"github.com/proservices/socket-golang-server/web"
 )
 
 // Easier to get running with CORS. Thanks for help @Vindexus and @erkie
@@ -34,6 +36,8 @@ func main() {
 		fmt.Println("connected")
 		return nil
 	})
+	web.RegisterEvents(server)
+	mobile.RegisterEvents(server)
 
 	server.OnError("/", func(s socketio.Conn, e error) {
 		log.Println("meet error:", e)
