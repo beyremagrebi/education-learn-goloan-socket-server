@@ -7,4 +7,4 @@ test:
 	@go test -v ./...
 
 run: build
-	@./bin/square
+	@./bin/erudaxis
