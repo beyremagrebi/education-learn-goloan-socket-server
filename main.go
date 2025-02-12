@@ -14,7 +14,6 @@ import (
 	"github.com/proservices/socket-golang-server/web"
 )
 
-// Easier to get running with CORS. Thanks for help @Vindexus and @erkie
 var allowOriginFunc = func(r *http.Request) bool {
 	return true
 }
@@ -57,6 +56,6 @@ func main() {
 	http.Handle("/socket.io/", server)
 	http.Handle("/", http.FileServer(http.Dir("../asset")))
 
-	fmt.Println("Serving at :8800")
+	fmt.Println("Server running at Port:8800")
 	log.Fatal(http.ListenAndServe(":8800", nil))
 }

@@ -6,7 +6,6 @@ import (
 	socketio "github.com/googollee/go-socket.io"
 )
 
-// RegisterEvents registers web-related events
 func RegisterEvents(server *socketio.Server) {
 	server.OnEvent("/", "join", func(s socketio.Conn, room string) {
 		fmt.Printf("User joined to room %s\n", room)
@@ -16,7 +15,6 @@ func RegisterEvents(server *socketio.Server) {
 	server.OnEvent("/", "send-meet-notification", func(s socketio.Conn, users any) {
 		server.BroadcastToRoom("/", "studiffy", "send-meet-notification", users)
 	})
-	// Handle "accesDeniedForRule" event
 	server.OnEvent("/", "accesDeniedForRule", func(s socketio.Conn, data interface{}) {
 		server.BroadcastToRoom("/", "studiffy", "accesDeniedForRule", data)
 	})
