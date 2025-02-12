@@ -1,7 +1,7 @@
 export CGO_ENABLED=0
 
 build:
-	@go build -o bin/square main.go
+	@go build -o bin/erudaxis main.go
 
 test:
 	@go test -v ./...
