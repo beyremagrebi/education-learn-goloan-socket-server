@@ -1,0 +1,21 @@
+name: Go
+
+on:
+  push:
+    branches: [ "prod" ]
+
+jobs:
+
+  build:
+    runs-on: go-prod
+    steps:
+   # - run: sudo chown -R $(whoami) /home/ubuntu/mail/actions-runner/_work/square-mail/square-mail/bin/
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.18.1'
+
+    - name: run
+      #run: sudo pm2 restart email
