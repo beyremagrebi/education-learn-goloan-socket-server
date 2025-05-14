@@ -142,6 +142,7 @@ func RegisterEvents(server *socketio.Server) {
 		updateRoomData := map[string]interface{}{
 			"chatId": chatId,
 		}
+		fmt.Print("hello")
 		server.BroadcastToRoom("/", userId, "update-private-room", updateRoomData)
 	})
 	server.OnEvent("/", "check-group-room", func(userSocket socketio.Conn, chatId string) {
